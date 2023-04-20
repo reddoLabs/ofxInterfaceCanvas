@@ -25,10 +25,10 @@ namespace ofxInterface {
 	void Layer::preDraw()
 	{
 		
-		if (!renderedLayer.isAllocated()) renderedLayer.allocate(getWidth(), getHeight());
+		if (!renderedLayer.isAllocated()) renderedLayer.allocate(getWidth(), getHeight(), GL_RGBA32F_ARB);
 
 		if (mask.isAllocated()) {
-			if (!maskFbo.isAllocated()) maskFbo.allocate(getWidth(), getHeight());
+			if (!maskFbo.isAllocated()) maskFbo.allocate(getWidth(), getHeight(), GL_RGBA32F_ARB);
 			maskFbo.begin();
 			ofClear(0, 0);
 			
@@ -37,7 +37,12 @@ namespace ofxInterface {
 			renderedLayer.begin();
 			ofClear(0, 0);
 		}
-		ofEnableBlendMode(blendMode);
+
+		// fbo errors in alpha
+		if (blendMode != ofBlendMode::OF_BLENDMODE_ALPHA) {
+			ofEnableBlendMode(blendMode);
+		}
+		
 	}
 
 
@@ -72,7 +77,9 @@ namespace ofxInterface {
 				ofPopMatrix();
 			}
 		}
-		//ofDisableBlendMode();
+		if (blendMode != ofBlendMode::OF_BLENDMODE_ALPHA) {
+			ofDisableBlendMode();
+		}
 	}
 
 	float Layer::getOpacity()
@@ -98,14 +105,10 @@ namespace ofxInterface {
 	void Layer::initShader()
 	{
 		string vertex = STRINGIFY(
-		#version 150\n
-
 		uniform mat4 modelViewProjectionMatrix;
 
 		in vec4 position;
 		in vec2 texcoord;
-
-
 
 		void main()
 		{
@@ -115,9 +118,11 @@ namespace ofxInterface {
 		}
 
 		);
-		string fragment = STRINGIFY(
-			#version 150\n
 
+		vertex = "#version 150\n" + vertex;
+
+		string fragment =
+			STRINGIFY(
 			// this is how we receive the texture
 			uniform sampler2DRect tex0;
 		uniform sampler2DRect maskTex;
@@ -132,6 +137,8 @@ namespace ofxInterface {
 			outputColor = vec4(color.r, color.g, color.b, mask.r);
 		}
 		);
+
+		fragment = "#version 150\n"  + fragment;
 		maskShader.setupShaderFromSource(GL_VERTEX_SHADER, vertex);
 		maskShader.setupShaderFromSource(GL_FRAGMENT_SHADER, fragment);
 		maskShader.linkProgram();

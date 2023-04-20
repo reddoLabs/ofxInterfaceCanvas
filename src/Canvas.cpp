@@ -28,7 +28,7 @@ namespace ofxInterface {
 	ofFbo Canvas::renderInFbo(int dstWidth, int dstHeight, ofScaleMode mode)
 	{
 		ofFbo fbo;
-		fbo.allocate(dstWidth, dstHeight);
+		fbo.allocate(dstWidth, dstHeight, GL_RGBA32F_ARB);
 		renderInFboRef(fbo, mode);
 
 		return fbo;
@@ -48,6 +48,8 @@ namespace ofxInterface {
 		ofRectangle scale = ofRectangle(src.x, src.y, float(src.getWidth()) / float(getWidth()), float(src.getHeight()) / float(getHeight()));
 
 		fbo.begin();
+		enableSeperateBlending();
+
 
 		// opengl3 flips textures vertically, so mirror if opengl3
 		if (ofIsGLProgrammableRenderer()) {
@@ -72,12 +74,27 @@ namespace ofxInterface {
 		if (ofIsGLProgrammableRenderer()) {
 			ofPopMatrix();
 		}
+
+		disableSeperateBlending();
 		fbo.end();
 	}
 
 	void Canvas::draw()
 	{
 		if (!isSetupReady) ofLogError("Canvas::draw()", "Please setup canvas before drawing");
+	}
+
+	void Canvas::setSize(float w, float h)
+	{
+		Node::setSize(w,h);
+		for (auto& layer : getLayers()) {
+			layer->setSize(w,h);
+		}
+	}
+
+	void Canvas::setSize(const ofVec2f& s)
+	{
+		setSize(s.x, s.y);
 	}
 
 	void Canvas::addLayer(Layer * layer, int insertAt)
@@ -145,6 +162,20 @@ namespace ofxInterface {
 		return ret;
 	}
 
+	void Canvas::enableSeperateBlending()
+	{
+		// blending seperate alpha
+		glPushAttrib(GL_ALL_ATTRIB_BITS);
+		glEnable(GL_BLEND);
+		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
+	void Canvas::disableSeperateBlending()
+	{
+		glDisable(GL_BLEND);
+		glPopAttrib();
+	}
+
 	LayerContainer::LayerContainer()
 	{
 	}
@@ -165,9 +196,11 @@ namespace ofxInterface {
 				ofFboSettings s;
 				s.width = getWidth();
 				s.height = getHeight();
+				s.numSamples = GL_RGBA32F_ARB;
 				borderFbo.allocate(s);
 			}
 			borderFbo.begin();
+			Canvas::enableSeperateBlending();
 			ofPushMatrix();
 			ofClear(0, 0);
 		}
@@ -177,6 +210,7 @@ namespace ofxInterface {
 	{
 		if (maskBorderElements) {
 			ofPopMatrix();
+			Canvas::disableSeperateBlending();
 			borderFbo.end();
 			borderFbo.draw(0, 0);
 		}
@@ -200,32 +234,46 @@ namespace ofxInterface {
 	{
 	}
 
+	void CanvasRefNode::setup(CanvasRefNodeSettings settings)
+	{
+		Node::setup(settings);
+		canvas = settings.original;
+
+		ofFboSettings s;
+		horzAlignment = settings.horzAlignment;
+		vertAlignment = settings.vertAlignment;
+
+		scaleMode = settings.scaleMode;
+
+		checkFbo();
+	}
+
 	void CanvasRefNode::setup(int width, int height, Canvas * original, ofAlignHorz alignment_, ofScaleMode scaleMode_)
 	{
-		setSize(width, height);
-		canvas = original;
+		CanvasRefNodeSettings settings;
+		settings.size = ofVec2f(width, height);
+		settings.original = original;
 		
-		ofFboSettings s;
-		alignment = alignment_;
-		scaleMode = scaleMode_;
+		settings.horzAlignment = alignment_;
+		settings.scaleMode = scaleMode_;
 
-		if (scaleMode == OF_SCALEMODE_FIT) {
-			fbo.allocate(canvas->getWidth(), canvas->getHeight());
-		}
-		else if (scaleMode == OF_SCALEMODE_FILL) {
-			ofRectangle src(0, 0, canvas->getWidth(), canvas->getHeight());
-			ofRectangle dest(0, 0, getWidth(), getHeight());
-			dest.scaleTo(src, OF_SCALEMODE_FIT);
-			fbo.allocate(dest.width,dest.height);
-			dDraw = ofVec2f(dest.x, -dest.y);
-		}
+		setup(settings);
+	}
+
+	void CanvasRefNode::setCanvas(Canvas* original)
+	{
+		canvas = original;
+		checkFbo();
 	}
 
 	void CanvasRefNode::draw()
 	{
+		checkFbo();
+
 		ofPushMatrix();
 		ofEnableAlphaBlending();
 			fbo.begin();
+
 			// opengl3 flips textures vertically, so mirror if opengl3
 			if (ofIsGLProgrammableRenderer()) {
 				ofPushMatrix();
@@ -233,11 +281,29 @@ namespace ofxInterface {
 				ofScale(1, -1, 1);
 			}
 			ofPushMatrix();
+
+			// move to align correctly
+			if (vertAlignment == OF_ALIGN_VERT_BOTTOM) {
+				dDraw.y = fbo.getHeight() - canvas->getHeight();
+			}else if (vertAlignment == OF_ALIGN_VERT_CENTER) {
+				dDraw.y = 0.5*(fbo.getHeight() - canvas->getHeight());
+			}
+			if (horzAlignment == OF_ALIGN_HORZ_RIGHT) {
+				dDraw.x = fbo.getWidth() - canvas->getWidth();
+			}
+			else if (horzAlignment == OF_ALIGN_VERT_CENTER) {
+				dDraw.x = 0.5 * (fbo.getWidth() - canvas->getWidth());
+
+			}
 			ofTranslate(dDraw);
 			ofClear(0, 0);
 			canvas->render();
-			ofSetColor(255, 0, 0);
 			ofPopMatrix();
+
+			//  blending seperate alpha
+			glDisable(GL_BLEND);
+			glPopAttrib();
+
 			fbo.end();
 			if (ofIsGLProgrammableRenderer()) {
 				ofPopMatrix();
@@ -246,12 +312,44 @@ namespace ofxInterface {
 		ofRectangle dest(0, 0, getWidth(), getHeight());
 		src.scaleTo(dest, OF_SCALEMODE_FIT);
 
+		
+
 		ofEnableAlphaBlending();
 
 		
 		fbo.draw(src);
 
 		ofPopMatrix();
+	}
+
+	void CanvasRefNode::checkFbo()
+	{
+		bool allocate = false;
+		ofRectangle scaleDim;
+		if (!fbo.isAllocated()) {
+			allocate = true;
+		}
+
+		if (scaleMode == OF_SCALEMODE_FIT &&
+			(fbo.getWidth() != canvas->getWidth() || fbo.getHeight() != canvas->getHeight())) {
+			scaleDim = ofRectangle(0, 0, canvas->getWidth(), canvas->getHeight());
+			allocate = true;
+		}
+		else if (scaleMode == OF_SCALEMODE_FILL) {
+			ofRectangle src(0, 0, canvas->getWidth(), canvas->getHeight());
+			scaleDim = ofRectangle(0, 0, getWidth(), getHeight());
+			scaleDim.scaleTo(src, OF_SCALEMODE_FIT);
+
+			if (fbo.getWidth() != scaleDim.width || fbo.getHeight() != scaleDim.height) {
+				allocate = true;
+			}
+			
+		}
+
+		if (allocate) {
+			fbo.allocate(scaleDim.width, scaleDim.height, GL_RGBA32F_ARB);
+			dDraw = ofVec2f(scaleDim.x, -scaleDim.y);
+		}
 	}
 
 

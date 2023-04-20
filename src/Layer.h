@@ -4,6 +4,7 @@
 #define STRINGIFY(...) STRINGIFY_AUX(__VA_ARGS__)
 #define STRINGIFY_AUX(...) #__VA_ARGS__
 
+
 namespace ofxInterface {
 
 	class LayerSettings {

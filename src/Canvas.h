@@ -41,6 +41,9 @@ namespace ofxInterface {
 
 		void draw() override;
 
+		void setSize(float w, float h) override;
+		void setSize(const ofVec2f& s) override;
+
 		void addLayer(Layer* layer, int insertAt = -1);
 		void removeLayer(Layer* layer);
 		void removeLayer(string layerName);
@@ -52,8 +55,11 @@ namespace ofxInterface {
 
 		virtual ofJson getNodeJson() override;
 
-	protected:
+		static void enableSeperateBlending();
+		static void disableSeperateBlending();
 
+	protected:
+		
 
 	private:
 		//attributes
@@ -66,6 +72,13 @@ namespace ofxInterface {
 
 	};
 
+	struct CanvasRefNodeSettings : public NodeSettings {
+		ofAlignHorz horzAlignment = OF_ALIGN_HORZ_CENTER;
+		ofAlignVert vertAlignment = OF_ALIGN_VERT_CENTER;
+		ofScaleMode scaleMode = OF_SCALEMODE_FIT;
+		Canvas* original;
+	};
+
 	/// \brief a class to draw multiple instances of a Canvas in a convenient way
 	class CanvasRefNode : public Node
 	{
@@ -73,13 +86,19 @@ namespace ofxInterface {
 		CanvasRefNode();
 		~CanvasRefNode();
 
-		void setup(int width, int height, Canvas* original, ofAlignHorz alignment = OF_ALIGN_HORZ_CENTER, ofScaleMode scaleMode = OF_SCALEMODE_FIT);
+		void setup(CanvasRefNodeSettings settings);
+		void setup(int width, int height, Canvas* original, ofAlignHorz horzAlignment = OF_ALIGN_HORZ_CENTER, ofScaleMode scaleMode = OF_SCALEMODE_FIT);
+		void setCanvas(Canvas* original);
 		void draw();
+
+	protected:
+		void checkFbo();
 
 	private:
 		Canvas* canvas;
 		ofFbo fbo;
-		ofAlignHorz alignment = OF_ALIGN_HORZ_CENTER;
+		ofAlignHorz horzAlignment = OF_ALIGN_HORZ_CENTER;
+		ofAlignVert vertAlignment = OF_ALIGN_VERT_CENTER;
 		ofScaleMode scaleMode = OF_SCALEMODE_FIT;
 		ofVec2f dDraw = ofVec2f(0, 0);
 	};
